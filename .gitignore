@@ -1,7 +1,2 @@
 /target
-/fib-1-layout.png
-/fib-2-layout.png
-/fib-3-layout.png
-/pyth-layout.png
-/range-check-1-layout.png
-/range-check-2-layout.png
+*.png

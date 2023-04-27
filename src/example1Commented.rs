@@ -12,8 +12,8 @@ use halo2_proofs::{dev::circuit_dot_graph};
 #[derive(Debug, Clone)]
 
 
-// Defines the configuration of all the columns, and all of the column definitions
-// Will be incrementally populated and passed around
+// Defines the columns that will be used with in the circuit.
+// Does not include the assignment of values within the circuit. 
 struct FibonacciConfig {
     pub col_a: Column<Advice>,
     pub col_b: Column<Advice>,
@@ -21,15 +21,14 @@ struct FibonacciConfig {
     pub selector: Selector,
     pub instance: Column<Instance>,
 }
+// a | b | c | s | i 
+
+
 
 #[derive(Debug, Clone)]
 struct FibonacciChip<F: FieldExt> {
     config: FibonacciConfig,
     _marker: PhantomData<F>,
-    // In rust, when you have a struct that is generic over a type parameter (here F),
-    // but the type parameter is not referenced in a field of the struct,
-    // you have to use PhantomData to virtually reference the type parameter,
-    // so that the compiler can track it.  Otherwise it would give an error. - Jason
 }
 
 impl<F: FieldExt> FibonacciChip<F> {
@@ -41,54 +40,44 @@ impl<F: FieldExt> FibonacciChip<F> {
         }
     }
 
-    // Configure will set what type of columns things are, enable equality, create gates, and return a config with all the gates
+    // Configure defines the gate constraint for the circuit. 
     pub fn configure(meta: &mut ConstraintSystem<F>) -> FibonacciConfig {
-       //add to advice column to ConstraintSystem. Set Query of this column to zero and add to conut of advice columns
+        // Gate requires 3 advice columns
+        // Instantiate these columns
         let col_a = meta.advice_column();
-        // returns an advice column where {index= num_advice_column, column type = Advice}
         let col_b = meta.advice_column();
-        // private witnesses
         let col_c = meta.advice_column();
-        // selevtor for gate
+        
+        // Gate requires one selector for gate
+        // Instantiate the selector
         let selector = meta.selector();
-        // public inputs
+        
+        // Instantiate the input column  
         let instance = meta.instance_column();
-        // All of these are added to the constaint system 
-        //println!("Column's A Index: {:?}",instance); 
+        
 
-
-        // enable_equality has some cost, so we only want to define it on rows where we need copy constraints
-        // adds column to permutation vector in constraint system  
+        // Enable equality allows us to define columns that have copy constraints. 
+        // This does not assign copy constraints but instead marks columns that contain copy constraints. 
         meta.enable_equality(col_a);
         meta.enable_equality(col_b);
         meta.enable_equality(col_c);
-        // Adds to permutation vector 
-        // if it has not been quried then adds it to
-        //advice_queries and sets num_advice_queries to be 1 at corresponding spot 
         meta.enable_equality(instance);
 
-        //adds to query HERE! 
 
 
-        // Defining a create_gate here applies it over every single column in the circuit.
-        // We will use the selector column to decide when to turn this gate on and off, since we probably don't want it on every row
+        // Defining our addition gate.
+        // Selector column decides when to turn this gate on and off.
+        // 
         meta.create_gate("add", |meta| {
             //
             // col_a | col_b | col_c | selector
             //   a      b        c       s
-            //
-            // add to quried_cells in vituual cells 
-            // returns selector expersision with seleleter inside
+
             let s = meta.query_selector(selector);
             let a = meta.query_advice(col_a, Rotation::cur());
-            //println!("Column's A Index in VCell: {:?}",a); 
-
             let b = meta.query_advice(col_b, Rotation::cur());
-            //println!("Column's b Index in VCell: {:?}",b); 
-
             let c = meta.query_advice(col_c, Rotation::cur());
-            //println!("Column's c Index in VCell: {:?}",c); 
-
+            // Defines Gate equation
             vec![s * (a + b - c)]
         });
 //println!("GATES {:?}",meta);
