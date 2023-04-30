@@ -7,17 +7,14 @@ use std::marker::PhantomData;
 #[derive(Debug, Clone)]
 struct ACell<F: FieldExt>(AssignedCell<F, F>);
 
-
-// One Advice column
-// Selector remains
-// instance column  
-// Holds columns in used in circuit 
+//Column 
+// | a | s | i | 
 #[derive(Debug, Clone)]
 struct FiboConfig {
     advice: Column<Advice>,
     selector: Selector,
     instance: Column<Instance>,
-}
+} 
 
 // Chip definition
 #[derive(Debug, Clone)]
@@ -27,29 +24,28 @@ struct FiboChip<F: FieldExt> {
 }
 
 impl<F: FieldExt> FiboChip<F> {
-    // contruscts a Fibochip object
     pub fn construct(config: FiboConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
         }
     }
-    // configure a chip object
-    // THIS DEFINES ARE CONSTRAINTS BASED ON CELLS 
-    // I.E GATE DEFINTIONS - via the call create_gate
+    // Configure defines the gate constraint for the circuit
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         advice: Column<Advice>,
         instance: Column<Instance>,
     ) -> FiboConfig {
-        // create a new selector turns it on!
+        // Gate Requires 1 advice column
         let selector = meta.selector();
-        // Enable equality for advice columns
+        
+        // Enable Permutation checking 
         meta.enable_equality(advice);
         meta.enable_equality(instance);
 
-        // create gate 
-        // This is the constraints that we would like to hold between the five columns 
+        // Defining the addition gate
+        // Selector Column turns this gate on and off
+        // 
         meta.create_gate("add", |meta| {
             //
             // advice | selector
@@ -63,6 +59,7 @@ impl<F: FieldExt> FiboChip<F> {
             let c = meta.query_advice(advice, Rotation(2));
             vec![s * (a + b - c)]
         });
+
 // Returns a configuration 
         FiboConfig {
             advice,
@@ -71,9 +68,9 @@ impl<F: FieldExt> FiboChip<F> {
         }
     }
 
-// ASSIGNS COPY CONSTRAINTS
-// no constraints here though
-
+// This assigns values each time the addition gate
+// called. 
+// No Copy Constraints assigned! 
     pub fn assign(
         &self,
         mut layouter: impl Layouter<F>,
@@ -82,13 +79,14 @@ impl<F: FieldExt> FiboChip<F> {
         layouter.assign_region(
             || "entire fibonacci table",
             |mut region| {
-                // enable selector in row0 and row 1 
+                // enable row 0 and row 1 selector 
                 self.config.selector.enable(&mut region, 0)?;
                 self.config.selector.enable(&mut region, 1)?;
                 
 
-                // All columns are treated as vectors
-                //assign to adivce column row 0 the instance column at entry 0 
+                // Columns are treated as vectors
+                // Assign to adivce column row 0 
+                // the instance element at entry 0 
                 let mut a_cell = region.assign_advice_from_instance(
                     || "1",
                     self.config.instance,
@@ -96,7 +94,9 @@ impl<F: FieldExt> FiboChip<F> {
                     self.config.advice,
                     0,
                 )?;
-                // assign to advice column at row 1 the instance column enrry 1
+
+                // Assign to adivce column row 1 
+                // the instance element at entry 1                 
                 let mut b_cell = region.assign_advice_from_instance(
                     || "1",
                     self.config.instance,
@@ -104,6 +104,14 @@ impl<F: FieldExt> FiboChip<F> {
                     self.config.advice,
                     1,
                 )?;
+
+                //   I     A   S
+                // | 1  | 1  | 1 | 
+                // | 1  | 1  | 1 |
+                // 
+                //      
+                // Summary of above
+
 
                 for row in 2..nrows {
                     if row < nrows - 2 {
@@ -119,6 +127,15 @@ impl<F: FieldExt> FiboChip<F> {
 
                     a_cell = b_cell;
                     b_cell = c_cell;
+                    
+                    // Summary of First Loop
+                    //   I     A   S
+                    // | 1  | 1  | 1 | 
+                    // | 1  | 1  | 1 |
+                    // |    | 2  | 1 |
+                    //
+                    // Then a = 1 and b = 2 
+                    //
                 }
 
                 Ok(b_cell)
@@ -126,6 +143,7 @@ impl<F: FieldExt> FiboChip<F> {
         )
     }
 
+// Checks that the output is expected. 
     pub fn expose_public(
         &self,
         mut layouter: impl Layouter<F>,
@@ -153,6 +171,7 @@ mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            // Allocate an advice column and an instance column in ConstraintSystem
             let advice = meta.advice_column();
             let instance = meta.instance_column();
             FiboChip::configure(meta, advice, instance)

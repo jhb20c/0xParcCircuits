@@ -80,7 +80,7 @@ impl<F: FieldExt> FibonacciChip<F> {
             // Defines Gate equation
             vec![s * (a + b - c)]
         });
-//println!("GATES {:?}",meta);
+
         FibonacciConfig {
             col_a,
             col_b,
@@ -90,9 +90,8 @@ impl<F: FieldExt> FibonacciChip<F> {
         }
     }
 
-    // These assign functions are to be called by the synthesizer, and will be used to assign values to the columns (the witness)
-    // The layouter will collect all the region definitions and compress it horizontally (i.e. squeeze up/down)
-    // but not vertically (i.e. will not squeeze left/right, at least right now)
+   // This assign values to the first row of our circuit.
+   //
     #[allow(clippy::type_complexity)]
     pub fn assign_first_row(
         &self,
@@ -101,11 +100,12 @@ impl<F: FieldExt> FibonacciChip<F> {
         layouter.assign_region(
             || "first row",
             |mut region| {
+                // Turn on our addition gate. 
                 self.config.selector.enable(&mut region, 0)?;
-                //Assign the value of the instance column's cell
-                //at absolute location row to the column advice at 
-                //offset within this region.
-                //Returns the advice cell, and its value if known.
+                
+                // Assigns position zero of column a within current region to be 
+                // position zero of instance vector.
+                // No copy constraints assigned.
                 let a_cell = region.assign_advice_from_instance(
                     || "f(0)",
                     self.config.instance,
@@ -113,14 +113,10 @@ impl<F: FieldExt> FibonacciChip<F> {
                     self.config.col_a,
                     0,
                 )?;
-                // How doe witness column and instance column cowork? 
-                // Instance are the public inputs
-                // adive are the private values
 
-                // Example Starting input and endng value for Fibonancci sequence
-                
-                // assign to advice column b at row 0 the instance column enrry 1
-
+                // Assigns position zero of column b within current region to be 
+                // position one of instance vector.
+                // No copy constraints assigned.
                 let b_cell = region.assign_advice_from_instance(
                     || "f(1)",
                     self.config.instance,
@@ -128,26 +124,26 @@ impl<F: FieldExt> FibonacciChip<F> {
                     self.config.col_b,
                     0,
                 )?;
-                // assign_advice is you witnessing something
-                // assign_advice_from_instance is you copying something from instance column
-
-                // Start by assigning the public inputs (instance) f(0),f(1) to Witness columns
+                
+                // Assigns advice a + b to column c position zero within current region
+                // No copy constraints assigned. 
                 let c_cell = region.assign_advice(
                     || "a + b",
                     self.config.col_c,
                     0,
                     || a_cell.value().copied() + b_cell.value(),
                 )?;
-
+                // Returns the triplet of our assigned cells. 
                 Ok((a_cell, b_cell, c_cell))
-                // NOTE ASSIGN_ADVICE DOES NOT IMPOSE copy constraints
             },
         )
     }
+    // | a  | b  |   c   |
+    // | I0 | I1 | I0+I1 |  
 
-// Note copy_advice does impost restrictions 
-// NEW REGION NEW REGION
-    // This will be repeatedly called. Note that each time it makes a new region, comprised of a, b, c, s that happen to all be in the same row
+
+   // This assign values to the nth row of our circuit.
+   // Input is previous cells 
     pub fn assign_row(
         &self,
         mut layouter: impl Layouter<F>,
@@ -157,15 +153,18 @@ impl<F: FieldExt> FibonacciChip<F> {
         layouter.assign_region(
             || "next row",
             |mut region| {
-                //enable this selector within the given region at 0 
+                // Turn on our addition gate. 
                 self.config.selector.enable(&mut region, 0)?;
 
                 // Copy the value from b & c in previous row to a & b in current row
                 
-                //For previous b I would likt to copy col_a at current row
+                // From previous cell b/c copy the value and place it in column a/b at position 0 within current region. 
+                // Constraints the values to be equal! 
                 prev_b.copy_advice(|| "a", &mut region, self.config.col_a, 0)?;
                 prev_c.copy_advice(|| "b", &mut region, self.config.col_b, 0)?;
-
+                
+                
+                // assigns b+c to be equal to position zero of column c in current region 
                 let c_cell = region.assign_advice(
                     || "c",
                     self.config.col_c,
@@ -174,11 +173,13 @@ impl<F: FieldExt> FibonacciChip<F> {
                 )?;
 
                 Ok(c_cell)
+                // Returns only cell C 
             },
         )
     }
-// Final constraint 
-// A cell must equal to the absolute value of the instance row
+    // | b | c | b+c | 
+
+// Checks that output is expected.  
     pub fn expose_public(
         &self,
         mut layouter: impl Layouter<F>,
@@ -192,43 +193,38 @@ impl<F: FieldExt> FibonacciChip<F> {
 #[derive(Default)]
 struct MyCircuit<F>(PhantomData<F>);
 
-// Our circuit will instantiate an instance based on the interface defined on the chip and floorplanner (layouter)
-// There isn't a clear reason this and the chip aren't the same thing, except for better abstractions for complex circuits
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     type Config = FibonacciConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
-    // Circuit without witnesses, called only during key generation
+    // Circuit without witnesses.
     fn without_witnesses(&self) -> Self {
         Self::default()
     }
 
-    // Has the arrangement of columns. Called only during keygen, and will just call chip config most of the time
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         FibonacciChip::configure(meta)
     }
 
     // Take the output of configure and floorplanner type to make the actual circuit
-    // Called both at key generation time, and proving time with a specific witness
-    // Will call all of the copy constraints
     fn synthesize(
         &self,
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        //Constructs Constraint System 
+        // Constructs Gate constraints 
         let chip = FibonacciChip::construct(config);
-        //Calls Layouter and assigns first row 
+        // Assigns first row 
         let (_, mut prev_b, mut prev_c) =
             chip.assign_first_row(layouter.namespace(|| "first row"))?;
-        // Uses layouter to assign other rows 
+        // Assign remaining rows 
         for _i in 3..10 {
             let c_cell = chip.assign_row(layouter.namespace(|| "next row"), &prev_b, &prev_c)?;
             prev_b = prev_c;
             prev_c = c_cell;
         }
-
+        // Constraints the output to be equal to the instance input at position 2
         chip.expose_public(layouter.namespace(|| "out"), &prev_c, 2)?;
 
         Ok(())
@@ -285,7 +281,6 @@ mod tests {
 
         let mut public_input = vec![a, b, out];
 
-        // This prover is faster and 'fake', but is mostly a devtool for debugging
         let prover = MockProver::run(k, &circuit, vec![public_input.clone()]).unwrap();
         // This function will pretty-print on errors
         prover.assert_satisfied();
